@@ -22,31 +22,41 @@ function App() {
 
   useEffect(() => {
     (async () => {
-      const overTimeData = await fetch(`${GOOGLE_SCRIPT_URL}?sheet=${month}`);
-      const results = await overTimeData.json();
-      const result = results?.data?.slice(1).map((row: any) => ({
-        date: row[3],
-        userId: row[1],
-        minutes: row[7],
-      }));
-      const userData = await fetch(`${GOOGLE_SCRIPT_URL}?sheet=Users`);
-      const users = await userData.json();
+      try {
+        const overTimeData = await fetch(`${GOOGLE_SCRIPT_URL}?sheet=${month}`);
+        const results = await overTimeData.json();
+        const result = results?.data?.slice(1).map((row: any) => ({
+          date: row[3],
+          userId: row[1],
+          minutes: row[7],
+        }));
+        const userData = await fetch(`${GOOGLE_SCRIPT_URL}?sheet=Users`);
+        const users = await userData.json();
 
-      const userList = users?.data?.slice(1).map((row: any) => ({
-        id: row[0],
-        name: row[1],
-        department: row[2],
-        work_start: row[3],
-        work_end: row[4],
-      }));
+        const userList = users?.data?.slice(1).map((row: any) => ({
+          id: row[0],
+          name: row[1],
+          department: row[2],
+          work_start: row[3],
+          work_end: row[4],
+        }));
 
-      setUserData(userList);
+        setUserData(userList);
 
-      const convertedData = convertData(rawData, result);
-      setAttendanceData(convertedData);
-      setIsLoading(false);
+        const convertedData = convertData(rawData, result);
+        console.log(convertedData, "convertedData");
+
+        setAttendanceData(convertedData);
+        setIsLoading(false);
+      } catch (error) {
+        console.error("Error fetching data:-1", error);
+        setIsLoading(false);
+      }
     })();
   }, [month, rawData]);
+
+  console.log(rawData, "rawData");
+  console.log(attendanceData, "attendanceData");
 
   const handleFileUpload = async (file: File) => {
     if (!file) return;
@@ -97,6 +107,25 @@ function App() {
 
   const date = { startDate: "", endDate: "" };
 
+  // Helper function to detect if a row contains attendance time data
+  function isAttendanceDataRow(row: any[]): boolean {
+    if (!Array.isArray(row) || row.length === 0) return false;
+
+    // Check if row contains time-formatted strings (HH:MM or HH:MMHH:MM pattern)
+    const timePattern = /^\d{2}:\d{2}/;
+    let timeEntryCount = 0;
+
+    for (const cell of row) {
+      if (cell && typeof cell === "string" && timePattern.test(cell)) {
+        timeEntryCount++;
+      }
+    }
+
+    // If at least 3 cells contain time data, consider it an attendance row
+    // This handles cases where some days might be empty/null
+    return timeEntryCount >= 3;
+  }
+
   function convertData(datas, overTimeData) {
     const result = [];
     let currentEmployee = null;
@@ -124,14 +153,19 @@ function App() {
       ) {
         // Save previous employee if exists
         if (currentEmployee && attendanceData) {
-              const workHours = userData?.find((user) => user.id === currentEmployee?.id);
+          const workHours = userData?.find(
+            (user) => user.id === currentEmployee?.id,
+          );
           const userOverTime = overTimeData?.filter(
-            (item) => item.userId === currentEmployee.id
+            (item) => item.userId === currentEmployee.id,
           );
           currentEmployee.attendances = parseAttendances(
             attendanceData,
             userOverTime,
-            { work_start: workHours?.work_start, work_end: workHours?.work_end }
+            {
+              work_start: workHours?.work_start,
+              work_end: workHours?.work_end,
+            },
           );
           result.push(currentEmployee);
         }
@@ -150,34 +184,40 @@ function App() {
 
         attendanceData = null;
       }
-      // Check if this row contains attendance times (should have 31 or close to 31 entries for days of month)
+      // Check if this row contains attendance times
+      // Support variable month lengths (19 days, 31 days, etc.)
       else if (
         Array.isArray(row) &&
-        row.length >= 25 &&
+        row.length >= 10 &&
         currentEmployee &&
-        !row.includes("ID:")
+        !row.includes("ID:") &&
+        isAttendanceDataRow(row)
       ) {
         attendanceData = row;
       }
     }
+    console.log(currentEmployee, "currentEmployee");
+    console.log(attendanceData, "attendanceData");
 
     // Don't forget the last employee
     if (currentEmployee && attendanceData) {
-      const workHours = userData?.find((user) => user.id === currentEmployee?.id);
+      const workHours = userData?.find(
+        (user) => user.id === currentEmployee?.id,
+      );
       const userOverTime = overTimeData?.filter(
-        (item) => item.userId === currentEmployee.id
+        (item) => item.userId === currentEmployee.id,
       );
       currentEmployee.attendances = parseAttendances(
         attendanceData,
         userOverTime,
-        { work_start: workHours?.work_start, work_end: workHours?.work_end }
+        { work_start: workHours?.work_start, work_end: workHours?.work_end },
       );
       result.push(currentEmployee);
     }
+    console.log(result, "finalResult");
 
     return result;
   }
-  console.log(userData, "userData");
 
   const parseAttendances = (timeData, overTimeData, workHours) => {
     const attendances = [];
@@ -231,7 +271,6 @@ function App() {
         }
       }
     }
-
     return attendances;
   };
 
@@ -239,12 +278,12 @@ function App() {
     entry: any,
     overTimeData: any,
     dateStr: string,
-    workHours: any
+    workHours: any,
   ) {
     console.log(workHours, "workHours");
 
     const officeStart = workHours?.work_start || "09:00";
-    const officeEnd = workHours?.work_end || "17:30";
+    const officeEnd = workHours?.work_end || "18:00";
     // const officeStart = "09:00";
     // const officeEnd = "17:30";
 
@@ -318,7 +357,7 @@ function App() {
 
     const totalMinutes = end - start;
     const totalHours = `${Math.floor(totalMinutes / 60)}:${String(
-      totalMinutes % 60
+      totalMinutes % 60,
     ).padStart(2, "0")} hrs`;
     const totalWorkedMinutes = actualEndParseTime - actualStartParseTime;
     const standardMinutes = 8 * 60 + 30; // 8 hrs 30 mins = 510 mins
@@ -375,7 +414,7 @@ function App() {
   const totalEmployees = attendanceData.length;
   const totalRecords = attendanceData.reduce(
     (sum, emp) => sum + emp.attendances.length,
-    0
+    0,
   );
 
   return (
